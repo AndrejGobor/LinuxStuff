@@ -1,0 +1,169 @@
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/i2c.h>
+#include <linux/delay.h>
+#include <linux/slab.h>
+#include <linux/input-polldev.h>
+
+static const char buf1[2]={0xf0, 0x55}; 	//1 - gde, 2 - sta
+static const char buf2[2]={0xfb, 0x0};
+
+struct nunchuk_dev
+{
+	struct input_polled_dev* polled_input;
+	struct i2c_client* i2c_client;
+};
+
+static void nunchuck_poll(struct input_polled_dev* dev)
+{
+	struct nunchuk_dev* nunchuk;
+	
+	int err = -1;
+	char reg_buff[6];
+	char empty_write = 0x0;
+	
+	int cpressed;	
+	int zpressed;
+	
+	nunchuk = dev->private;	
+
+	mdelay(10);
+
+	i2c_master_send(nunchuk->i2c_client, &empty_write, 1);
+	
+	mdelay(10);
+	
+	err = i2c_master_recv(nunchuk->i2c_client, reg_buff, 6);
+
+	zpressed = reg_buff[5]&0x1; //0x1 = 0001
+	cpressed = reg_buff[5]&0x2; //0x2 = 0010
+	cpressed>>=1;
+	
+	input_event(dev->input, EV_KEY, BTN_C, cpressed);
+        input_event(dev->input, EV_KEY, BTN_Z, zpressed);
+	input_sync(dev->input);
+
+	pr_info("bajtova primljeno: %d", err);
+	
+	pr_info("x-axis: %d\n", reg_buff[0]);
+	pr_info("y-axis: %d\n", reg_buff[1]);
+	pr_info("x-axis accel: %d\n", reg_buff[2]);
+	pr_info("y-axis accel: %d\n", reg_buff[3]);
+	pr_info("z-axis accel: %d\n", reg_buff[4]);
+	pr_info("button Z: %d\n", zpressed);
+	pr_info("button C: %d\n", cpressed);
+
+}
+
+static int nunchuk_probe(struct i2c_client *client, const struct i2c_device_id *id)
+{
+	int err = -1;
+	
+	struct input_polled_dev* polled_input;
+	struct input_dev* input;
+
+	struct nunchuk_dev *nunchuk;
+	
+	nunchuk = devm_kzalloc(&client->dev, sizeof(struct nunchuk_dev), GFP_KERNEL);
+
+	if (!nunchuk)
+	{
+		dev_err(&client->dev, "Failed to allocate memory\n");
+		return -ENOMEM;	
+	}
+	
+	polled_input = input_allocate_polled_device();
+	
+
+	nunchuk->i2c_client = client;
+	nunchuk->polled_input = polled_input;
+	
+	polled_input->private = nunchuk;
+	polled_input->poll = nunchuck_poll;
+	polled_input->poll_interval = 50;
+	
+	i2c_set_clientdata(client,nunchuk);	
+
+	input = polled_input->input;
+	input->dev.parent = &client->dev;	
+	input->name="Wii Nunchuk";
+	input->id.bustype = BUS_I2C;
+	
+	if(input_register_polled_device(polled_input) != 0){
+		return -ENOMEM;
+	}
+
+	set_bit(EV_KEY,input->evbit);
+	set_bit(BTN_C,input->keybit);
+	set_bit(BTN_Z,input->keybit);		
+	
+	
+	pr_info("Called nunchuk_probe\n");
+	
+	err = i2c_master_send(client, buf1, 2);		
+
+	if(err < 0){
+		pr_info("GRESKA, NIJE NISTA UPISANO U ADRESU 0XF0\n");
+	}else{
+		pr_info("SVE OKAY, UPISANO JE BROJ BITA %d U ADRESU 0XF0\n", err);	
+	}
+
+	udelay(1000);
+
+	err = i2c_master_send(client, buf2, 2);	
+
+	if(err < 0){
+		pr_info("GRESKA, NIJE NISTA UPISANO U ADRESU 0XFB\n");
+	}else{
+		pr_info("SVE OKAY, UPISANO JE BROJ BITA %d U ADRESU 0XFB\n", err);	
+	}
+
+	nunchuck_poll(polled_input);
+	//nunchuck_poll(polled_input);
+
+	return 0;
+}
+
+static int nunchuk_remove(struct i2c_client *client)
+{
+	struct input_polled_dev* polled_input;
+	struct nunchuk_dev* nunchuk;
+	
+	pr_info("Called nunchuk_remove\n");
+
+	nunchuk = (struct nunchuk_dev*) i2c_get_clientdata(client);
+	polled_input = nunchuk->polled_input;
+	input_unregister_polled_device(polled_input);
+	input_free_polled_device(polled_input);
+	
+	return 0;
+}
+
+static const struct i2c_device_id nunchuk_id[] = {
+	{ "nunchuk", 0 },
+	{ },
+};
+
+MODULE_DEVICE_TABLE(i2c, nunchuk_id);
+
+#ifdef CONFIG_OF
+static struct of_device_id nunchuk_dt_match[] = {
+	{ .compatible = "nintendo,nunchuk" },
+	{ },
+};
+#endif
+
+static struct i2c_driver nunchuk_driver = {
+	.driver = {
+		.name = "nunchuk",
+		.owner = THIS_MODULE,
+		.of_match_table = of_match_ptr(nunchuk_dt_match),
+	},
+	.probe = nunchuk_probe,
+	.remove = nunchuk_remove,
+	.id_table = nunchuk_id,
+};
+
+module_i2c_driver(nunchuk_driver);
+
+MODULE_LICENSE("GPL");
