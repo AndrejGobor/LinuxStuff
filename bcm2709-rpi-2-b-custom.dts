@@ -1,0 +1,40 @@
+/dts-v1/;
+
+#include "bcm2709.dtsi"
+#include "bcm2709-rpi.dtsi"
+#include "bcm283x-rpi-smsc9514.dtsi"
+#include "bcm283x-rpi-csi1-2lane.dtsi"
+#include "bcm283x-rpi-i2c0mux_0_28.dtsi"
+
+/ {
+	compatible = "raspberrypi,2-model-b", "brcm,bcm2836";
+	model = "Raspberry Pi 2 Model B";
+};
+
+&gpio {
+
+	i2c1_pins: i2c1 {
+		brcm,pins = <2 3>;
+		brcm,function = <4>;
+	};
+
+};
+
+&i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_pins>;
+	clock-frequency = <100000>;
+	status = "okay";
+	
+	nunchuk: nunchuk@52{
+		compatible = "nintendo";
+		reg = <0x52>;
+		status = "okay";
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+
